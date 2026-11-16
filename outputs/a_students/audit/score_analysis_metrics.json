@@ -1,0 +1,13 @@
+{
+  "title_rows": 44,
+  "unique_questions": 38,
+  "matched_records": 231811,
+  "invalid_score_or_time_records": 0,
+  "ambiguous_student_question_pairs": 0,
+  "latest_pairs": 50482,
+  "students": 1364,
+  "students_with_scores": 1364,
+  "overall_mean_student_score_rate": 0.7574432110038879,
+  "question_coverage_min": 1.0,
+  "question_coverage_max": 38.0
+}

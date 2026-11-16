@@ -1,0 +1,2 @@
+﻿scope,first_attempt_student_mean,latest_attempt_student_mean,submission_weighted_record_mean,pair_weighted_latest_mean,n_students_first,n_students_latest,n_records,n_pairs,latest_minus_first
+overall,0.426871,0.757443,0.335707,0.763898,1364,1364,231811,50482,0.330573
