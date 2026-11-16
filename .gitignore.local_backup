@@ -1,0 +1,5 @@
+# Ignore documents in the project root.
+/docs/
+
+# Local Python virtual environment.
+/.venv/
