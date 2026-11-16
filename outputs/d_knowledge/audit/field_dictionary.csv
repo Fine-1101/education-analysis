@@ -16,7 +16,7 @@ Data_SubmitRecord,state,作答状态,string,0,13,Absolutely_Correct,12 个正常
 Data_SubmitRecord,score,本题得分,string,0,5,3,0 至该题满分；与 state 逻辑一致
 Data_SubmitRecord,title_ID,题目编号,string,0,38,Question_bumGRTJ0c8p4v5D6eHZa,
 Data_SubmitRecord,method,解题方法编码,string,0,5,Method_Cj9Ya2R7fZd6xs1q5mNQ,
-Data_SubmitRecord,memory,内存占用（单位未说明）,string,0,715,320,0-65536，D 模块不使用
-Data_SubmitRecord,timeconsume,耗时（单位未说明，含 '--'）,string,0,168,3,含 2612 条 '--'；D 模块不使用
+Data_SubmitRecord,memory,内存占用（单位未说明）,string,0,715,320,0-65536，知识点与掌握情况模块不使用
+Data_SubmitRecord,timeconsume,耗时（单位未说明，含 '--'）,string,0,168,3,含 2612 条 '--'；知识点与掌握情况模块不使用
 Data_SubmitRecord,student_ID,学生编号,string,0,1365,8b6d1125760bd3939b6e,
 Data_SubmitRecord,source_file,来源文件名（程序附加）,str,0,15,SubmitRecord-Class1.csv,

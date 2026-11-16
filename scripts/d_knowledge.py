@@ -1,11 +1,22 @@
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch
 
 # 根据脚本位置定位项目目录，避免依赖个人电脑的绝对路径
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw" / "chinavis2024_education"
 OUT_DIR = ROOT / "outputs" / "d_knowledge"
+REPORT_DIR = ROOT / "docs" / "report"
+
+FIGURE_DPI = 300
 
 STUDENT_FILE = RAW_DIR / "Data_StudentInfo.csv"
 TITLE_FILE = RAW_DIR / "Data_TitleInfo.csv"
@@ -77,8 +88,8 @@ FIELD_NOTES = {
     ("Data_SubmitRecord", "time"): "整数秒级时间戳；数据未附说明，单位按数值范围推断",
     ("Data_SubmitRecord", "state"): "12 个正常取值 + 6 条 U+FFFD 乱码（源文件损坏）",
     ("Data_SubmitRecord", "score"): "0 至该题满分；与 state 逻辑一致",
-    ("Data_SubmitRecord", "memory"): "0-65536，D 模块不使用",
-    ("Data_SubmitRecord", "timeconsume"): "含 2612 条 '--'；D 模块不使用",
+    ("Data_SubmitRecord", "memory"): "0-65536，知识点与掌握情况模块不使用",
+    ("Data_SubmitRecord", "timeconsume"): "含 2612 条 '--'；知识点与掌握情况模块不使用",
 }
 
 
@@ -86,12 +97,14 @@ FIELD_NOTES = {
 # 基础工具
 # ---------------------------------------------------------------------------
 def ensure_output_dirs() -> dict:
-    """创建四个输出目录，允许重复运行。"""
+    """创建输出目录，允许重复运行；说明文档统一放在 docs/report/。"""
     dirs = {}
     for name in ("figures", "tables", "audit", "intermediate"):
         path = OUT_DIR / name
         path.mkdir(parents=True, exist_ok=True)
         dirs[name] = path
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    dirs["report"] = REPORT_DIR
     return dirs
 
 
@@ -572,7 +585,7 @@ def write_filtering_notes(
 ) -> None:
     """把过滤规则与数量写成可读说明，风格与 A 模块的 deduplication_notes 一致。"""
     text = (
-        "D模块数据过滤与数量说明（阶段2）\n"
+        "知识点与掌握情况模块数据过滤与数量说明（阶段2）\n"
         "范围：data/raw/chinavis2024_education 下的 15 个班级提交文件。\n"
         "原始数据只读；本阶段只做检查与计数，清洗后的全量记录在阶段3输出。\n"
         "\n"
@@ -779,7 +792,7 @@ def check_submission_table(
         make_check(
             "R11", "提交记录", "state 非标准取值", len(repaired),
             int(abnormal_state.sum()), 0,
-            "保留并审计；D 模块按 score 评分，不使用 state", len(repaired),
+            "保留并审计；知识点与掌握情况模块按 score 评分，不使用 state", len(repaired),
             "源文件内即为 U+FFFD 替换字符，属数据损坏，见 state_anomaly_records.csv",
         )
     )
@@ -817,7 +830,7 @@ def check_submission_table(
         make_check(
             "R13", "提交记录", "timeconsume 非数字", len(repaired),
             int(consume_numeric.isna().sum()), 0,
-            "D 模块不使用该字段，仅记录", len(repaired),
+            "知识点与掌握情况模块不使用该字段，仅记录", len(repaired),
             "取值形如 '--'，会影响时间类分析",
         )
     )
@@ -1634,7 +1647,7 @@ def build_phase3_reconciliation(
 def write_metric_definitions(path: Path, stats: dict) -> None:
     """写出指标定义、公式、分子分母与统计范围。"""
     sensitivity = stats["sensitivity"]
-    text = f"""# D模块指标定义与计算口径
+    text = f"""# 知识点与掌握情况模块指标定义与计算口径
 
 本文件由 `scripts/d_knowledge.py` 在阶段3自动生成，文中数值来自本次运行。
 所有指标均由 `data/raw/chinavis2024_education/` 的原始数据重新计算得到。
@@ -1925,6 +1938,507 @@ def run_metrics(ctx: dict) -> None:
     print("\n统计表目录：", tables_dir)
 
 
+# ---------------------------------------------------------------------------
+# 阶段4：可视化图表与流程图
+# ---------------------------------------------------------------------------
+def setup_plot_style() -> None:
+    """统一中文字体与负号显示，沿用 A 模块设置。"""
+    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
+    plt.rcParams["axes.unicode_minus"] = False
+
+
+def read_figure_table(tables_dir: Path, name: str, **kwargs) -> pd.DataFrame:
+    """读取阶段3统计表，缺失时给出明确错误。"""
+    path = tables_dir / name
+    if not path.exists():
+        raise FileNotFoundError(f"缺少阶段3统计表，无法绘图：{path}")
+    return pd.read_csv(path, **kwargs)
+
+
+def plot_knowledge_coverage(tables_dir: Path, figures_dir: Path) -> Path:
+    """图1：主知识点覆盖题量横向柱状图（同时标注参与学生数）。"""
+    coverage = read_figure_table(
+        tables_dir, "knowledge_coverage.csv", dtype={"knowledge": "string"}
+    )
+    coverage = coverage.sort_values(
+        ["question_count", "knowledge"], ascending=[False, True]
+    ).reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    single_question = coverage["question_count"].eq(1)
+    colors = np.where(single_question, "#EE6666", "#5470C6")
+
+    bars = ax.barh(
+        coverage["knowledge"],
+        coverage["question_count"],
+        color=colors,
+        height=0.62,
+        zorder=3,
+    )
+    ax.invert_yaxis()
+    labels = [
+        f"{int(question)} 道｜{int(student):,} 人"
+        for question, student in zip(
+            coverage["question_count"], coverage["student_count"]
+        )
+    ]
+    ax.bar_label(bars, labels=labels, padding=5, fontsize=9, color="#333333")
+
+    max_question = int(coverage["question_count"].max())
+    ax.set_xlim(0, max_question * 1.62)
+    ax.set_xticks(np.arange(0, max_question + 2, 2))
+    ax.set_xlabel("题目数量（道）", fontsize=11)
+    ax.set_ylabel("主知识点编码", fontsize=11)
+    ax.set_title("各主知识点覆盖题量", fontsize=15, pad=12)
+    ax.tick_params(axis="both", labelsize=10)
+    ax.grid(axis="x", linestyle="--", alpha=0.25, zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+
+    legend_handles = [
+        Patch(facecolor="#5470C6", label="覆盖题量（道）"),
+        Patch(facecolor="#EE6666", label="仅 1 道题的知识点"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="lower right",
+        frameon=False,
+        fontsize=9,
+    )
+    fig.text(
+        0.5,
+        0.015,
+        "注：题量按知识点分别统计，一题多知识点会重复计入；全库唯一题目共 38 道。"
+        "柱末标注为「题量｜参与学生数」。",
+        ha="center",
+        fontsize=8.5,
+        color="#555555",
+    )
+    fig.tight_layout(rect=(0, 0.055, 1, 1))
+
+    path = figures_dir / "知识点覆盖题量.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
+def plot_knowledge_performance(tables_dir: Path, figures_dir: Path) -> Path:
+    """图2：主知识点平均得分率柱状图（含样本量与参考线）。"""
+    performance = read_figure_table(
+        tables_dir, "knowledge_performance.csv", dtype={"knowledge": "string"}
+    )
+    performance = performance.sort_values(
+        "mean_score_rate", ascending=False
+    ).reset_index(drop=True)
+    overall = read_figure_table(tables_dir, "sensitivity_overall.csv")
+    overall_rate = float(overall.loc[0, "latest_attempt_student_mean"]) * 100
+
+    rates = performance["mean_score_rate"].to_numpy(dtype=float) * 100
+    single_question = performance["question_count"].eq(1)
+    colors = np.where(single_question, "#EE6666", "#5470C6")
+    labels = [
+        f"{knowledge}*" if single else str(knowledge)
+        for knowledge, single in zip(
+            performance["knowledge"], single_question
+        )
+    ]
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+    bars = ax.bar(labels, rates, color=colors, width=0.62, zorder=3)
+    for bar, rate, students in zip(
+        bars, rates, performance["n_students"]
+    ):
+        center = bar.get_x() + bar.get_width() / 2
+        ax.text(
+            center,
+            rate + 1.2,
+            f"{rate:.2f}%",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color="#333333",
+        )
+        ax.text(
+            center,
+            2.0,
+            f"n={int(students):,}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color="white",
+        )
+
+    ax.axhline(
+        overall_rate,
+        color="#B45309",
+        linestyle="--",
+        linewidth=1.3,
+        zorder=4,
+        label=f"全体学生等权均值 {overall_rate:.2f}%",
+    )
+    ax.set_ylim(0, 100)
+    ax.set_xlabel("主知识点编码", fontsize=11)
+    ax.set_ylabel("平均得分率（%）", fontsize=11)
+    ax.set_title("各主知识点平均得分率（最终有效作答）", fontsize=15, pad=12)
+    ax.tick_params(axis="both", labelsize=10)
+    ax.grid(axis="y", linestyle="--", alpha=0.25, zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(
+        handles=[
+            Patch(facecolor="#5470C6", label="平均得分率"),
+            Patch(facecolor="#EE6666", label="* 仅 1 道题（稳定性较弱）"),
+            Line2D(
+                [0],
+                [0],
+                color="#B45309",
+                linestyle="--",
+                linewidth=1.3,
+                label=f"全体学生等权均值 {overall_rate:.2f}%",
+            ),
+        ],
+        loc="upper left",
+        frameon=False,
+        fontsize=8.5,
+    )
+    fig.text(
+        0.5,
+        0.015,
+        "注：* k4W1c、s8Y2f 各只有 1 道题，均值即该题的平均得分率，稳定性较弱。"
+        "参考线为全体学生等权均值，不是各知识点均值的算术平均；"
+        "得分率不等同于真实知识掌握程度。",
+        ha="center",
+        fontsize=8.5,
+        color="#555555",
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+
+    path = figures_dir / "知识点得分率.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
+def plot_student_knowledge_heatmap(
+    tables_dir: Path, intermediate_dir: Path, figures_dir: Path
+) -> Path:
+    """图3：全部学生×主知识点得分率热力图；无数据灰色，0 分保留在色阶中。"""
+    matrix = pd.read_csv(
+        intermediate_dir / "student_knowledge_matrix.csv",
+        dtype={"student_ID": "string"},
+    )
+    if "knowledge" in matrix.columns:
+        knowledge_columns = [c for c in matrix.columns if c != "student_ID"]
+    else:
+        knowledge_columns = [c for c in matrix.columns if c != "student_ID"]
+
+    values = matrix[knowledge_columns].to_numpy(dtype=float)
+    row_mean = np.nanmean(values, axis=1)
+    order = np.argsort(-row_mean, kind="stable")
+    values = values[order]
+    masked = np.ma.masked_invalid(values)
+
+    cmap = plt.get_cmap("RdYlGn").copy()
+    cmap.set_bad("#D9D9D9")
+
+    fig, ax = plt.subplots(figsize=(11, 15))
+    image = ax.imshow(
+        masked,
+        aspect="auto",
+        cmap=cmap,
+        vmin=0,
+        vmax=1,
+        interpolation="nearest",
+    )
+    ax.set_xticks(range(len(knowledge_columns)))
+    ax.set_xticklabels(knowledge_columns, rotation=45, ha="right", fontsize=10)
+    ax.set_yticks([])
+    ax.set_xlabel("主知识点编码", fontsize=11)
+    ax.set_ylabel(
+        f"学生（按有数据知识点的等权平均降序，共 {len(matrix):,} 人）",
+        fontsize=11,
+    )
+    ax.set_title(
+        f"学生×主知识点得分率热力图（全量 {len(matrix):,} 名学生）",
+        fontsize=16,
+        pad=14,
+    )
+    ax.set_xticks(np.arange(-0.5, len(knowledge_columns), 1), minor=True)
+    ax.grid(which="minor", axis="x", color="white", linewidth=0.8)
+    ax.tick_params(which="minor", bottom=False)
+
+    colorbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
+    colorbar.set_label("学生-知识点得分率", fontsize=10)
+    colorbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+    colorbar.set_ticklabels(["0%", "25%", "50%", "75%", "100%"])
+    colorbar.ax.tick_params(labelsize=9)
+
+    missing_handle = Patch(
+        facecolor="#D9D9D9", edgecolor="#999999", label="无有效作答（不计 0 分）"
+    )
+    fig.legend(
+        handles=[missing_handle],
+        loc="lower left",
+        bbox_to_anchor=(0.10, 0.008),
+        frameon=False,
+        fontsize=9,
+    )
+    fig.text(
+        0.34,
+        0.014,
+        "彩色格：得分率 0%（深红）→ 100%（深绿）；真实 0 分保留在色阶中。",
+        ha="left",
+        fontsize=9,
+        color="#555555",
+    )
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+
+    path = figures_dir / "学生知识点得分率热力图.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
+def plot_score_distribution(tables_dir: Path, figures_dir: Path) -> Path:
+    """图4：学生-知识点得分率箱线图（不以提交记录为样本）。"""
+    long = read_figure_table(
+        tables_dir,
+        "student_knowledge_score_rate.csv",
+        dtype={"student_ID": "string"},
+    )
+    performance = read_figure_table(
+        tables_dir, "knowledge_performance.csv", dtype={"knowledge": "string"}
+    ).sort_values("mean_score_rate", ascending=False)
+    order = performance["knowledge"].tolist()
+    counts = dict(zip(performance["knowledge"], performance["n_students"]))
+
+    groups = [
+        long.loc[long["knowledge"].eq(k), "score_rate"].dropna().to_numpy()
+        * 100
+        for k in order
+    ]
+    means = [values.mean() for values in groups]
+    labels = [
+        f"{knowledge}\n(n={int(counts[knowledge]):,})" for knowledge in order
+    ]
+
+    fig, ax = plt.subplots(figsize=(12, 6.5))
+    box = ax.boxplot(
+        groups,
+        tick_labels=labels,
+        patch_artist=True,
+        widths=0.55,
+        showfliers=False,
+        boxprops={"facecolor": "#CBD5F0", "edgecolor": "#4C5B8A"},
+        medianprops={"color": "#B45309", "linewidth": 1.8},
+        whiskerprops={"color": "#4C5B8A"},
+        capprops={"color": "#4C5B8A"},
+    )
+
+    # 离群值用固定随机种子的横向抖动散点展示，避免同一取值的点完全重叠
+    rng = np.random.default_rng(2024)
+    for index, values in enumerate(groups):
+        q1, q3 = np.percentile(values, [25, 75])
+        iqr = q3 - q1
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        outliers = values[(values < lower) | (values > upper)]
+        if outliers.size:
+            jitter = rng.uniform(-0.10, 0.10, outliers.size)
+            ax.scatter(
+                np.full(outliers.size, index + 1) + jitter,
+                outliers,
+                s=7,
+                facecolor="#888888",
+                edgecolor="none",
+                alpha=0.35,
+                zorder=3,
+            )
+    ax.scatter(
+        range(1, len(groups) + 1),
+        means,
+        marker="D",
+        s=30,
+        facecolor="white",
+        edgecolor="#B45309",
+        linewidth=1.0,
+        zorder=4,
+    )
+
+    ax.set_ylim(-3, 104)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_xlabel("主知识点编码（按平均得分率降序）", fontsize=11)
+    ax.set_ylabel("学生-知识点得分率（%）", fontsize=11)
+    ax.set_title("各主知识点学生得分率分布", fontsize=15, pad=40)
+    ax.tick_params(axis="both", labelsize=9.5)
+    ax.grid(axis="y", linestyle="--", alpha=0.25, zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+
+    legend_handles = [
+        Line2D([0], [0], color="#B45309", linewidth=2, label="中位数"),
+        Line2D(
+            [0],
+            [0],
+            marker="D",
+            color="none",
+            markerfacecolor="white",
+            markeredgecolor="#B45309",
+            label="均值",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor="#999999",
+            label="离群值",
+        ),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=3,
+        frameon=False,
+        fontsize=9,
+    )
+    fig.text(
+        0.5,
+        0.015,
+        "注：样本为 10,810 个学生-知识点得分率（每名学生每个知识点一个值），不是提交记录。"
+        "箱体为 P25–P75，中线为中位数，菱形为均值，灰点为离群值；"
+        "各知识点中位数均为 100%，差异主要体现在低分尾部。",
+        ha="center",
+        fontsize=8.5,
+        color="#555555",
+    )
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+
+    path = figures_dir / "知识点得分率分布.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
+def render_figures(dirs: dict) -> None:
+    """生成四张正式图表。"""
+    setup_plot_style()
+    tables_dir = dirs["tables"]
+    figures_dir = dirs["figures"]
+    intermediate_dir = dirs["intermediate"]
+
+    paths = [
+        plot_knowledge_coverage(tables_dir, figures_dir),
+        plot_knowledge_performance(tables_dir, figures_dir),
+        plot_student_knowledge_heatmap(
+            tables_dir, intermediate_dir, figures_dir
+        ),
+        plot_score_distribution(tables_dir, figures_dir),
+    ]
+    print("\n—— 图表生成 ——")
+    for path in paths:
+        print("已保存：", path)
+
+
+def render_flowchart(report_dir: Path) -> Path:
+    """生成与代码执行顺序一致的知识点与掌握情况模块数据处理流程图。"""
+    setup_plot_style()
+    steps = [
+        ("1. 原始数据读取", "学生表、题目表、15 个班级提交文件"),
+        ("2. 数据质量检查", "字段缺失、取值、满分冲突、题目覆盖"),
+        ("3. class 字段修复", "6 条字面值 class 按来源文件修复"),
+        ("4. 完全重复记录处理", "九字段完全相同的 1,006 条记录单独存档并排除"),
+        ("5. 学生信息匹配", "排除 1 条无法匹配学生表的记录"),
+        ("6. 有效作答筛选", "分数与时间可解析、且 0 ≤ 得分 ≤ 满分"),
+        ("7. 最终作答提取", "每生每题取最晚有效记录（50,482 组）；另取首次作答"),
+        ("8. 主/子知识点分别关联", "43 条 / 44 条，两套映射不混用"),
+        ("9. 学生-知识点得分率", "学生在该知识点下各题得分率等权平均"),
+        ("10. 知识点覆盖与表现统计", "题量、参与学生、提交记录、学生等权均值"),
+        ("11. 敏感性分析", "首次 / 最终 / 全部提交加权三种口径对照"),
+        ("12. 可视化图表生成", "覆盖题量、得分率、热力图、箱线图"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(9, 13.8))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    top = 0.925
+    gap = 0.0725
+    height = 0.055
+    width = 0.64
+    center_x = 0.5
+
+    for index, (title, detail) in enumerate(steps):
+        y = top - index * gap
+        box = FancyBboxPatch(
+            (center_x - width / 2, y - height),
+            width,
+            height,
+            boxstyle="round,pad=0.004,rounding_size=0.012",
+            linewidth=1.2,
+            edgecolor="#5470C6",
+            facecolor="#EAF0FB",
+            zorder=2,
+        )
+        ax.add_patch(box)
+        ax.text(
+            center_x,
+            y - height / 2 + 0.010,
+            title,
+            ha="center",
+            va="center",
+            fontsize=11.2,
+            color="#1F2D3D",
+            fontweight="bold",
+            zorder=3,
+        )
+        ax.text(
+            center_x,
+            y - height / 2 - 0.013,
+            detail,
+            ha="center",
+            va="center",
+            fontsize=8.6,
+            color="#555555",
+            zorder=3,
+        )
+        if index < len(steps) - 1:
+            ax.annotate(
+                "",
+                xy=(center_x, y - gap + 0.002),
+                xytext=(center_x, y - height - 0.002),
+                arrowprops={
+                    "arrowstyle": "-|>",
+                    "color": "#5470C6",
+                    "linewidth": 1.4,
+                    "shrinkA": 0,
+                    "shrinkB": 0,
+                },
+                zorder=1,
+            )
+
+    fig.suptitle("知识点与掌握情况模块数据处理流程图", fontsize=18, y=0.975)
+    fig.text(
+        0.5,
+        0.016,
+        "注：步骤与 scripts/d_knowledge.py 的实际执行顺序一致；全流程只读原始数据。\n"
+        "统计表、审计记录与图表写入 outputs/d_knowledge/，说明文档与流程图写入 docs/report/。",
+        ha="center",
+        va="bottom",
+        fontsize=8.5,
+        linespacing=1.5,
+        color="#555555",
+    )
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.95, bottom=0.05)
+
+    path = report_dir / "知识点与掌握情况模块数据处理流程图.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
 def main() -> None:
     dirs = ensure_output_dirs()
     students = read_students()
@@ -1932,6 +2446,8 @@ def main() -> None:
     records, profile = read_submission_files()
     ctx = run_quality_checks(students, titles, records, profile, dirs)
     run_metrics(ctx)
+    render_figures(dirs)
+    render_flowchart(dirs["report"])
 
 
 if __name__ == "__main__":
