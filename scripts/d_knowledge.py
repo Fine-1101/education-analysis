@@ -14,7 +14,6 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw" / "chinavis2024_education"
 OUT_DIR = ROOT / "outputs" / "d_knowledge"
-REPORT_DIR = ROOT / "docs" / "report"
 
 FIGURE_DPI = 300
 
@@ -97,14 +96,12 @@ FIELD_NOTES = {
 # 基础工具
 # ---------------------------------------------------------------------------
 def ensure_output_dirs() -> dict:
-    """创建输出目录，允许重复运行；说明文档统一放在 docs/report/。"""
+    """创建输出目录，允许重复运行；模块说明与流程图放在 outputs/d_knowledge/report/。"""
     dirs = {}
-    for name in ("figures", "tables", "audit", "intermediate"):
+    for name in ("figures", "tables", "audit", "intermediate", "report"):
         path = OUT_DIR / name
         path.mkdir(parents=True, exist_ok=True)
         dirs[name] = path
-    REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    dirs["report"] = REPORT_DIR
     return dirs
 
 
@@ -2424,7 +2421,7 @@ def render_flowchart(report_dir: Path) -> Path:
         0.5,
         0.016,
         "注：步骤与 scripts/d_knowledge.py 的实际执行顺序一致；全流程只读原始数据。\n"
-        "统计表、审计记录与图表写入 outputs/d_knowledge/，说明文档与流程图写入 docs/report/。",
+        "统计表、审计记录与图表写入 outputs/d_knowledge/，模块说明与流程图写入 outputs/d_knowledge/report/。",
         ha="center",
         va="bottom",
         fontsize=8.5,
@@ -2439,6 +2436,188 @@ def render_flowchart(report_dir: Path) -> Path:
     return path
 
 
+def render_overall_flowchart(report_dir: Path) -> Path:
+    """绘制项目整体处理流程图，并标注各模块当前是否已接入。"""
+    setup_plot_style()
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    module_states = [
+        ("A", "A 学生与班级", "学生构成、班级参与、班级成绩",
+         (ROOT / "outputs" / "a_students").exists()),
+        ("B", "B 答题行为与时间", "时间分布、活跃天数、重试行为",
+         (ROOT / "outputs" / "b_behaviors").exists()),
+        ("C", "C 题目与作答表现", "首次/最终正确率、题目指标",
+         (ROOT / "outputs" / "c_questions").exists()),
+        ("D", "D 知识点与掌握情况", "覆盖、得分率、热力图",
+         (ROOT / "outputs" / "d_knowledge").exists()),
+    ]
+
+    fig, ax = plt.subplots(figsize=(14, 9))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    def draw_box(center_x, center_y, width, height, title, detail, *,
+                 face="#EAF0FB", edge="#5470C6", dashed=False,
+                 title_color="#1F2D3D", detail_color="#555555",
+                 title_size=12, detail_size=8.5):
+        patch = FancyBboxPatch(
+            (center_x - width / 2, center_y - height / 2),
+            width,
+            height,
+            boxstyle="round,pad=0.004,rounding_size=0.012",
+            linewidth=1.2,
+            edgecolor=edge,
+            facecolor=face,
+            linestyle="--" if dashed else "-",
+            zorder=2,
+        )
+        ax.add_patch(patch)
+        ax.text(
+            center_x,
+            center_y + height * 0.18,
+            title,
+            ha="center",
+            va="center",
+            fontsize=title_size,
+            fontweight="bold",
+            color=title_color,
+            zorder=3,
+        )
+        ax.text(
+            center_x,
+            center_y - height * 0.16,
+            detail,
+            ha="center",
+            va="center",
+            fontsize=detail_size,
+            color=detail_color,
+            linespacing=1.35,
+            zorder=3,
+        )
+
+    def arrow(x1, y1, x2, y2, color="#5470C6", linestyle="-"):
+        ax.annotate(
+            "",
+            xy=(x2, y2),
+            xytext=(x1, y1),
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": color,
+                "linewidth": 1.3,
+                "linestyle": linestyle,
+                "shrinkA": 0,
+                "shrinkB": 0,
+            },
+            zorder=1,
+        )
+
+    # 1. 原始数据
+    draw_box(
+        0.5, 0.895, 0.74, 0.075,
+        "原始数据（data/raw/chinavis2024_education）",
+        "学生表 1,364 行｜题目表 44 行｜15 个班级提交文件 232,818 行",
+        title_size=12.5, detail_size=8.6,
+    )
+    # 2. 全组统一口径
+    draw_box(
+        0.5, 0.775, 0.84, 0.075,
+        "全组统一口径",
+        "编号文本｜时间单位与时区｜状态编码｜九字段去重｜有效作答｜得分率｜缺失值",
+        title_size=12.5, detail_size=8.6,
+    )
+    arrow(0.5, 0.8575, 0.5, 0.8135)
+
+    # 3. 四个模块并行
+    module_centers = [0.14, 0.38, 0.62, 0.86]
+    for center_x, (code, title, detail, active) in zip(module_centers, module_states):
+        draw_box(
+            center_x, 0.575, 0.19, 0.16,
+            title, detail,
+            face="#EAF0FB" if active else "#F7F7F7",
+            edge="#5470C6" if active else "#999999",
+            dashed=not active,
+            title_color="#1F2D3D" if active else "#777777",
+            detail_color="#555555" if active else "#888888",
+            title_size=11, detail_size=8.2,
+        )
+        ax.text(
+            center_x, 0.527,
+            "状态：已接入" if active else "状态：待接入",
+            ha="center", va="center",
+            fontsize=8.2,
+            color="#2E7D32" if active else "#999999",
+            zorder=3,
+        )
+
+    # 口径到四模块的连接线
+    ax.plot([0.5, 0.5], [0.7375, 0.70], color="#5470C6", linewidth=1.3, zorder=1)
+    ax.plot([0.14, 0.86], [0.70, 0.70], color="#5470C6", linewidth=1.3, zorder=1)
+    for center_x, (_, _, _, active) in zip(module_centers, module_states):
+        arrow(
+            center_x, 0.70, center_x, 0.6565,
+            color="#5470C6" if active else "#999999",
+            linestyle="-" if active else "--",
+        )
+
+    # 4. 模块输出
+    draw_box(
+        0.5, 0.37, 0.80, 0.085,
+        "各模块独立输出",
+        "outputs/a_students｜outputs/b_behaviors｜outputs/c_questions｜outputs/d_knowledge\n"
+        "每模块含 figures / tables / audit / intermediate",
+        title_size=12, detail_size=8.3,
+    )
+    # 模块到输出的连接线
+    for center_x, (_, _, _, active) in zip(module_centers, module_states):
+        ax.plot(
+            [center_x, center_x], [0.495, 0.455],
+            color="#5470C6" if active else "#999999",
+            linewidth=1.2,
+            linestyle="-" if active else "--",
+            zorder=1,
+        )
+    ax.plot([0.14, 0.86], [0.455, 0.455], color="#5470C6", linewidth=1.3, zorder=1)
+    arrow(0.5, 0.455, 0.5, 0.4135)
+
+    # 5. D 汇总
+    draw_box(
+        0.5, 0.245, 0.70, 0.075,
+        "D 汇总全组指标字典与整体处理流程",
+        "outputs/d_knowledge/report/ 内：全组指标字典.md｜项目整体处理流程图.png",
+        title_size=12, detail_size=8.3,
+    )
+    arrow(0.5, 0.3275, 0.5, 0.2835)
+
+    # 6. A 合并 Word
+    draw_box(
+        0.5, 0.13, 0.58, 0.075,
+        "A 合并 Word 实验报告",
+        "各模块正文、图表与表格",
+        title_size=12, detail_size=8.3,
+    )
+    arrow(0.5, 0.2075, 0.5, 0.1685)
+
+    fig.suptitle("项目整体数据处理流程图", fontsize=18, y=0.965)
+    fig.text(
+        0.5,
+        0.022,
+        "注：A、D 已接入现有脚本与输出；B、C 按分工计划预留，待其脚本与输出接入后更新。\n"
+        "全流程只读原始数据，各模块输出到独立目录，公共口径见 outputs/d_knowledge/report/全组指标字典.md。",
+        ha="center",
+        va="bottom",
+        fontsize=8.5,
+        linespacing=1.5,
+        color="#555555",
+    )
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.945, bottom=0.02)
+
+    path = report_dir / "项目整体处理流程图.png"
+    fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+    return path
+
+
 def main() -> None:
     dirs = ensure_output_dirs()
     students = read_students()
@@ -2448,6 +2627,7 @@ def main() -> None:
     run_metrics(ctx)
     render_figures(dirs)
     render_flowchart(dirs["report"])
+    render_overall_flowchart(dirs["report"])
 
 
 if __name__ == "__main__":
