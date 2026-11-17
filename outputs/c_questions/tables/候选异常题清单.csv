@@ -1,0 +1,9 @@
+﻿title_ID,full_score,knowledge_count,sub_knowledge_count,participating_students,submission_count,mean_attempts,max_attempts,first_accuracy,final_accuracy,mean_final_score_rate,首次与最终差值,命中判据数,判据
+Question_q7OpB2zCMmW9wS8uNt3H,1,1,2,1359,11445,8.4216,152,0.17,0.6806,0.6806,0.5107,4,低最终正确率、低首次正确率、重试次数偏高、存在极端重试个例
+Question_3oPyUzDmQtcMfLpGZ0jW,2,1,1,1359,9916,7.2965,100,0.2104,0.6821,0.6954,0.4717,4,低最终正确率、低首次正确率、重试次数偏高、存在极端重试个例
+Question_5fgqjSBwTPG7KUV3it6O,3,1,1,1351,11714,8.6706,87,0.2087,0.6936,0.7876,0.4848,4,低最终正确率、低首次正确率、重试次数偏高、得分率明显高于正确率
+Question_3MwAFlmNO8EKrpY5zjUd,2,1,1,1360,12004,8.8265,80,0.2029,0.6985,0.7901,0.4956,4,低最终正确率、低首次正确率、重试次数偏高、得分率明显高于正确率
+Question_fZrP3FJ4ebUogW9V7taS,1,1,1,1357,9150,6.7428,83,0.2284,0.6883,0.6883,0.4598,3,低最终正确率、低首次正确率、重试次数偏高
+Question_n2BTxIGw1Mc3Zo6RLdUe,3,1,1,1350,6848,5.0726,61,0.2785,0.703,0.703,0.4244,3,低最终正确率、低首次正确率、重试次数偏高
+Question_BW0ItEaymH3TkD6S15JF,1,1,1,1349,7097,5.2609,60,0.3047,0.7109,0.7109,0.4062,3,低最终正确率、低首次正确率、重试次数偏高
+Question_pVKXjZn0BkSwYcsa7C31,3,2,2,1345,6596,4.9041,66,0.2952,0.7175,0.7393,0.4223,3,低最终正确率、低首次正确率、重试次数偏高
